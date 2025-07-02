@@ -1,0 +1,46 @@
+# .github/workflows/deploy.yml
+
+name: Build and Deploy to Azure Web App
+
+# Trigger the workflow on push events to the main branch
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Allows manual triggering from the GitHub UI
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 'Checkout GitHub Action'
+      uses: actions/checkout@v4
+
+    - name: 'Login to Azure'
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: 'Login to Azure Container Registry (ACR)'
+      uses: azure/docker-login@v1
+      with:
+        login-server: ${{ secrets.ACR_LOGIN_SERVER }}
+        username: ${{ secrets.ACR_USERNAME }}
+        password: ${{ secrets.ACR_PASSWORD }}
+
+    - name: Build and push Docker image to ACR
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        push: true
+        tags: |
+          ${{ secrets.ACR_LOGIN_SERVER }}/metamorphic-gpt:${{ github.sha }}
+          ${{ secrets.ACR_LOGIN_SERVER }}/metamorphic-gpt:latest
+
+    - name: 'Deploy to Azure Web App for Containers'
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+        images: '${{ secrets.ACR_LOGIN_SERVER }}/metamorphic-gpt:${{ github.sha }}'

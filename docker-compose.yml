@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  # The FastAPI Application
+  app:
+    build: .
+    # Mount the entire project directory into the container for live-reloading
+    volumes:
+      - .:/app
+    # Load environment variables from the .env file
+    env_file:
+      - .env
+    # Expose the app's port to the host machine
+    ports:
+      - "8000:8000"
+    # Make the app depend on the Qdrant database
+    depends_on:
+      - qdrant
+    # Command to run the app with hot-reloading for development
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # The Qdrant Vector Database
+  qdrant:
+    image: qdrant/qdrant:v1.9.0
+    # Expose Qdrant's gRPC and HTTP ports
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    # Persist Qdrant data to a local volume to avoid losing it on restart
+    volumes:
+      - ./qdrant_data:/qdrant/storage
