@@ -100,3 +100,5 @@ data/processed_files.json
 
 # OS specific
 .DS_Store
+
+documents/

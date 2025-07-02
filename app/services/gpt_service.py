@@ -3,7 +3,7 @@
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import Qdrant
 from langchain.prompts import PromptTemplate
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
@@ -66,39 +66,46 @@ class GPTService:
             input_variables=["context", "question", "core_values"]
         )
 
+    def _get_retriever(self, user_role: str):
+        """
+        This function returns a retriever which gets documents from Qdrant.
+        We use the user's role to filter the search.
+        """
+        # This filter ensures we search in documents relevant to the user's role
+        # OR in documents marked as 'general' for everyone.
+        role_filter = Filter(
+            should=[
+                FieldCondition(key="metadata.role", match=MatchValue(value=user_role)),
+                FieldCondition(key="metadata.role", match=MatchValue(value="general"))
+            ]
+        )
+        return self.vector_store.as_retriever(
+            search_type="similarity",
+            search_kwargs={'k': 4, 'filter': role_filter} # Retrieve top 4 docs matching the role
+        )
+
     def _create_rag_chain(self):
         """Creates the complete Retrieval-Augmented Generation (RAG) chain."""
         
-        # This function formats the retrieved documents into a readable string
         def format_docs(docs):
+            """Formats the retrieved documents into a readable string."""
             formatted_context = "\n\n---\n\n".join(
                 f"Source: {doc.metadata.get('source', 'N/A')}\n\nContent: {doc.page_content}" for doc in docs
             )
             return formatted_context
 
-        # This defines the retriever which gets documents from Qdrant
-        # We pass the user's role to filter the search
-        def get_retriever(user_role: str):
-            # This filter ensures we search in documents relevant to the user's role
-            # OR in documents marked as 'general' for everyone.
-            role_filter = Filter(
-                should=[
-                    FieldCondition(key="metadata.role", match=MatchValue(value=user_role)),
-                    FieldCondition(key="metadata.role", match=MatchValue(value="general"))
-                ]
-            )
-            return self.vector_store.as_retriever(
-                search_type="similarity",
-                search_kwargs={'k': 4, 'filter': role_filter} # Retrieve top 4 docs matching the role
-            )
-
-        # The LCEL (LangChain Expression Language) Chain
+        # This defines the retriever part of the chain.
+        # It uses a RunnableLambda to dynamically get the right retriever based on user_role.
+        retriever_chain = RunnableLambda(
+            lambda x: self._get_retriever(x["user_role"])
+        ).pipe(format_docs)
+        
+        # The full LCEL (LangChain Expression Language) Chain
         chain = (
             {
-                "context": (lambda x: get_retriever(x["user_role"])).pipe(format_docs),
+                "context": retriever_chain,
                 "question": RunnablePassthrough(),
-                "core_values": RunnablePassthrough(),
-                "user_role": RunnablePassthrough() # Pass role through for context
+                "core_values": RunnablePassthrough()
             }
             | self.prompt_template
             | self.model
@@ -112,7 +119,7 @@ class GPTService:
         The user's role is used to filter for relevant documents.
         """
         print(f"Invoking RAG chain for user role: {user_role}")
-        # The input to the chain must be a dictionary
+        # The input to the chain must be a dictionary that includes the original question and the user_role
         response = self.rag_chain.invoke({
             "question": query,
             "user_role": user_role,
