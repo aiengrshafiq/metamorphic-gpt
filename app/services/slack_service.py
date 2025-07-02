@@ -1,6 +1,8 @@
 # app/services/slack_service.py
 
 import re
+import requests
+import json
 from slack_bolt import App
 from slack_bolt.adapter.fastapi import SlackRequestHandler
 from threading import Thread
@@ -11,7 +13,9 @@ from app.services.gpt_service import gpt_service
 # Initialize the Slack App with token and signing secret
 slack_app = App(
     token=settings.SLACK_BOT_TOKEN,
-    signing_secret=settings.SLACK_SIGNING_SECRET
+    signing_secret=settings.SLACK_SIGNING_SECRET,
+    # This is important for a better threading model
+    process_before_response=True 
 )
 
 # This will be the handler that FastAPI uses
@@ -38,57 +42,68 @@ def get_user_role(user_id: str, client):
         print(f"Error fetching user role for {user_id}: {e}")
     return "general" # Default role if not found
 
-def process_request(body, say, client):
+def process_ai_request_and_respond(body, client):
     """
-    Handles the actual processing of a user's query in a separate thread
-    to avoid Slack API timeouts.
+    This function runs in a background thread to avoid timeouts.
+    It gets the AI's answer and sends it back to Slack.
     """
+    response_url = body.get("response_url")
+    user_id = body.get("user_id")
+    user_question = body.get("text")
+    channel_id = body.get("channel_id")
+    
     try:
-        user_id = body["user_id"]
-        user_question = body["text"]
-        
         # Clean up the question if it's a mention
-        user_question = re.sub(f"<@{body['api_app_id']}>", "", user_question).strip()
+        if 'api_app_id' in body:
+             user_question = re.sub(f"<@{body['api_app_id']}>", "", user_question).strip()
 
         if not user_question:
-            say("Please ask a question after mentioning me!")
-            return
+            message = "Please ask a question!"
+        else:
+            # Get user's role and the AI's answer
+            user_role = get_user_role(user_id, client)
+            message = gpt_service.get_answer(query=user_question, user_role=user_role)
 
-        # Get user's role from their Slack profile
-        user_role = get_user_role(user_id, client)
-        
-        # Get the answer from the GPT service
-        answer = gpt_service.get_answer(query=user_question, user_role=user_role)
-        
-        # Send the final answer
-        say(text=answer)
-        
     except Exception as e:
-        print(f"Error processing request: {e}")
-        say("Sorry, I encountered an error while processing your request. Please try again later.")
+        print(f"Error processing request in background: {e}")
+        message = "Sorry, I encountered an error. The engineers have been notified."
+
+    # Use the response_url for slash commands, or the client for mentions
+    if response_url:
+        requests.post(response_url, headers={"Content-Type": "application/json"}, data=json.dumps({"text": message}))
+    elif channel_id:
+        client.chat_postMessage(channel=channel_id, text=message)
 
 
 # --- SLACK EVENT LISTENERS ---
 
 @slack_app.event("app_mention")
-def handle_app_mentions(body, say, client, logger):
+def handle_app_mentions(body, say, client):
     """Handles mentions of the bot in any channel."""
-    # Acknowledge the request immediately
-    say(f"Hello <@{body['user']}>! I'm thinking about your question...")
+    # Send an immediate, temporary "thinking" message
+    say(f"Hello <@{body['event']['user']}>! I'm thinking about your question...")
+    
+    # Prepare a payload for the background thread
+    thread_payload = {
+        "user_id": body['event']['user'],
+        "text": body['event']['text'],
+        "channel_id": body['event']['channel'],
+        "api_app_id": body['api_app_id']
+    }
     
     # Offload the actual processing to a background thread
-    thread = Thread(target=process_request, args=(body['event'], say, client))
+    thread = Thread(target=process_ai_request_and_respond, args=(thread_payload, client))
     thread.start()
 
 @slack_app.command("/ask-metamorphic-gpt")
-def handle_slash_command(ack, body, say, client, logger):
-    """Handles the /ask-metamorphic-gpt slash command."""
-    # Acknowledge the command request immediately
-    ack()
+def handle_slash_command(ack, body, client):
+    """
+    Handles the /ask-metamorphic-gpt slash command.
+    Acknowledges immediately and offloads work to a thread.
+    """
+    # Acknowledge the command within 3 seconds with a temporary message
+    ack(text="Thinking about your question, please wait...")
     
-    # Acknowledge the request immediately
-    say(f"Hello <@{body['user_id']}>! I'm thinking about your question...")
-
     # Offload the actual processing to a background thread
-    thread = Thread(target=process_request, args=(body, say, client))
+    thread = Thread(target=process_ai_request_and_respond, args=(body, client))
     thread.start()
