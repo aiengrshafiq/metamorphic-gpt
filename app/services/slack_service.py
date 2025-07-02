@@ -23,9 +23,12 @@ app_handler = SlackRequestHandler(slack_app)
 
 # --- HELPER FUNCTIONS ---
 
+
+
 def get_user_role(user_id: str, client):
     """
     Fetches a user's profile from Slack to determine their role.
+    Includes enhanced error logging.
     """
     try:
         response = client.users_profile_get(user=user_id)
@@ -33,9 +36,18 @@ def get_user_role(user_id: str, client):
         fields = profile.get("fields", {})
         for field_id, field_data in fields.items():
             if field_data.get("label") == "Role":
+                # Found the role, return it
                 return field_data.get("value", "general").lower()
+        # If the loop finishes without finding the 'Role' field
+        print(f"User {user_id} profile checked, but 'Role' field not found.")
+        return "general"
+    except SlackApiError as e:
+        # This is the new, important logging part.
+        # It will print the exact error from Slack (e.g., 'missing_scope').
+        print(f"Slack API Error fetching user role for {user_id}: {e.response['error']}")
     except Exception as e:
-        print(f"Error fetching user role for {user_id}: {e}")
+        print(f"A non-API error occurred fetching user role for {user_id}: {e}")
+    
     return "general"
 
 def process_ai_request_and_respond(payload, client):
