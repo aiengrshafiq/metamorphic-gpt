@@ -1,5 +1,6 @@
 # app/services/gpt_service.py
 
+from operator import itemgetter
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import Qdrant
 from langchain.prompts import PromptTemplate
@@ -95,7 +96,6 @@ class GPTService:
             return formatted_context
 
         # This defines the retriever part of the chain.
-        # It uses a RunnableLambda to dynamically get the right retriever based on user_role.
         retriever_chain = RunnableLambda(
             lambda x: self._get_retriever(x["user_role"])
         ).pipe(format_docs)
@@ -104,8 +104,8 @@ class GPTService:
         chain = (
             {
                 "context": retriever_chain,
-                "question": RunnablePassthrough(),
-                "core_values": RunnablePassthrough()
+                "question": itemgetter("question"),
+                "core_values": itemgetter("core_values"),
             }
             | self.prompt_template
             | self.model
