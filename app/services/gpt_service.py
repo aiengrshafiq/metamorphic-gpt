@@ -5,6 +5,7 @@ from langchain_qdrant import Qdrant
 from langchain.prompts import PromptTemplate
 from langchain_core.runnables import RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.documents import Document
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 
@@ -32,30 +33,30 @@ class GPTService:
 
     def _create_prompt_template(self):
         template = """
-        You are the Metamorphic GPT, a highly specialized AI assistant for Metamorphic LLC employees.
-        Your purpose is to provide clear, accurate, and compliant answers based *only* on the provided official company documents.
-        You must adhere to the company's core values in your tone and responses.
+You are the Metamorphic GPT, a highly specialized AI assistant for Metamorphic LLC employees.
+Your purpose is to provide clear, accurate, and compliant answers based *only* on the provided official company documents.
+You must adhere to the company's core values in your tone and responses.
 
-        **Core Values:**
-        {core_values}
+**Core Values:**
+{core_values}
 
-        **Instructions:**
-        1. Analyze the user's question and the provided context (SOPs).
-        2. Formulate a direct and helpful answer using *only* the information from the context.
-        3. If the context does not contain the answer, you MUST state: "I could not find information on this topic in the available company documents. Please consult your manager or the relevant department."
-        4. DO NOT invent information or use external knowledge.
-        5. At the end of your answer, cite the source document(s) from the context metadata.
+**Instructions:**
+1. Analyze the user's question and the provided context (SOPs).
+2. Formulate a direct and helpful answer using *only* the information from the context.
+3. If the context does not contain the answer, you MUST state: "I could not find information on this topic in the available company documents. Please consult your manager or the relevant department."
+4. DO NOT invent information or use external knowledge.
+5. At the end of your answer, cite the source document(s) from the context metadata.
 
-        ---
-        **Context (Relevant SOPs):**
-        {context}
-        ---
+---
+**Context (Relevant SOPs):**
+{context}
+---
 
-        **User's Question:**
-        {question}
+**User's Question:**
+{question}
 
-        **Compliant Answer:**
-        """
+**Compliant Answer:**
+"""
         return PromptTemplate(
             template=template,
             input_variables=["context", "question", "core_values"]
@@ -74,23 +75,33 @@ class GPTService:
         )
 
     def _create_rag_chain(self):
-        """This is the corrected chain using the user's excellent suggestion."""
+        
         def format_docs(docs):
-            return "\n\n---\n\n".join(
-                f"Source: {doc.metadata.get('source', 'N/A')}\n\nContent: {doc.page_content}" for doc in docs
-            )
+            """
+            This robust version handles both Document objects and dictionaries.
+            """
+            formatted_strings = []
+            for doc in docs:
+                # Check if the item is a Document object
+                if isinstance(doc, Document):
+                    metadata = doc.metadata
+                    page_content = doc.page_content
+                # Check if the item is a dictionary
+                elif isinstance(doc, dict):
+                    metadata = doc.get('metadata', {})
+                    page_content = doc.get('page_content', '')
+                else:
+                    # Skip any other unexpected types
+                    continue
+                
+                source = metadata.get('source', 'N/A')
+                formatted_strings.append(f"Source: {source}\n\nContent: {page_content}")
+            
+            return "\n\n---\n\n".join(formatted_strings)
 
-        
-        
         def get_retrieved_docs(input_dict):
             retriever = self._get_retriever(input_dict["user_role"])
-            docs = retriever.invoke(input_dict["question"])
-            if not docs:
-                return [{
-                    "page_content": "",
-                    "metadata": {"source": "N/A"}
-                }]
-            return docs
+            return retriever.invoke(input_dict["question"])
 
         chain = (
             {
@@ -111,7 +122,6 @@ class GPTService:
             "user_role": user_role,
             "core_values": settings.METAMORPHIC_CORE_VALUES
         })
-        print(f"[GPTService] RAG chain output →\n{response}")
         return response
 
 gpt_service = GPTService()
