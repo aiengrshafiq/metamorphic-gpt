@@ -3,7 +3,7 @@ from operator import itemgetter
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_qdrant import Qdrant
 from langchain.prompts import PromptTemplate
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
@@ -79,9 +79,11 @@ class GPTService:
                 f"Source: {doc.metadata.get('source', 'N/A')}\n\nContent: {doc.page_content}" for doc in docs
             )
 
+        # This is the corrected chain construction.
+        # We wrap the lambda in RunnableLambda to make it a valid part of the chain.
         chain = (
             {
-                "context": (lambda x: self._get_retriever(x["user_role"])).pipe(format_docs),
+                "context": RunnableLambda(lambda x: self._get_retriever(x["user_role"])).pipe(format_docs),
                 "question": itemgetter("question"),
                 "core_values": itemgetter("core_values"),
             }
