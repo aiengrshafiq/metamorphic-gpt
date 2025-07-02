@@ -1,6 +1,4 @@
 # app/services/gpt_service.py
-    print("--- RUNNING LATEST gpt_service.py CODE (v3) ---") # Canary to check deployment
-
     from operator import itemgetter
     from langchain_openai import ChatOpenAI, OpenAIEmbeddings
     from langchain_qdrant import Qdrant # <-- UPDATED IMPORT
