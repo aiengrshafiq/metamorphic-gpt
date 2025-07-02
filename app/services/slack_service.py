@@ -38,18 +38,19 @@ def get_user_role(user_id: str, client):
         print(f"Error fetching user role for {user_id}: {e}")
     return "general"
 
-def process_ai_request_and_respond(body, client):
+def process_ai_request_and_respond(payload, client):
     """
     This function runs in a background thread to do the heavy lifting.
+    It now accepts a simple dictionary `payload` instead of a complex object.
     """
-    response_url = body.get("response_url")
-    user_id = body.get("user_id")
-    user_question = body.get("text")
-    channel_id = body.get("channel_id")
+    response_url = payload.get("response_url")
+    user_id = payload.get("user_id")
+    user_question = payload.get("text")
+    channel_id = payload.get("channel_id")
     
     try:
-        if 'api_app_id' in body:
-             user_question = re.sub(f"<@{body['api_app_id']}>", "", user_question).strip()
+        if 'api_app_id' in payload:
+             user_question = re.sub(f"<@{payload['api_app_id']}>", "", user_question).strip()
 
         if not user_question:
             message = "It looks like you didn't ask a question. Please try again!"
@@ -62,7 +63,6 @@ def process_ai_request_and_respond(body, client):
         message = "Sorry, I encountered an error while processing your request. The engineers have been notified."
 
     # Use the response_url to post the final answer back to the channel.
-    # This is the standard way to handle delayed responses for slash commands.
     if response_url:
         requests.post(response_url, headers={"Content-Type": "application/json"}, data=json.dumps({"text": message}))
     elif channel_id:
@@ -80,6 +80,7 @@ def handle_app_mentions(ack, body, say, client):
     # Send an immediate, temporary "thinking" message
     say(f"Hello <@{body['event']['user']}>! I'm thinking about your question...")
     
+    # Create a simple, safe dictionary to pass to the thread
     thread_payload = {
         "user_id": body['event']['user'],
         "text": body['event']['text'],
@@ -98,6 +99,13 @@ def handle_slash_command(ack, body, client):
     # Acknowledge the command within 3 seconds with a temporary message visible only to the user
     ack(text="Thinking about your question, please wait...")
     
+    # Create a simple, safe dictionary from the body to pass to the thread
+    thread_payload = {
+        "user_id": body.get("user_id"),
+        "text": body.get("text"),
+        "response_url": body.get("response_url")
+    }
+    
     # Offload the actual processing to a background thread
-    thread = Thread(target=process_ai_request_and_respond, args=(body, client))
+    thread = Thread(target=process_ai_request_and_respond, args=(thread_payload, client))
     thread.start()

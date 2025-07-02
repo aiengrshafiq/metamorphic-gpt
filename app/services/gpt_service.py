@@ -3,7 +3,7 @@ from operator import itemgetter
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_qdrant import Qdrant
 from langchain.prompts import PromptTemplate
-from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+from langchain_core.runnables import RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
@@ -74,16 +74,27 @@ class GPTService:
         )
 
     def _create_rag_chain(self):
+        """This is the corrected chain using the user's excellent suggestion."""
         def format_docs(docs):
             return "\n\n---\n\n".join(
                 f"Source: {doc.metadata.get('source', 'N/A')}\n\nContent: {doc.page_content}" for doc in docs
             )
 
-        # This is the corrected chain construction.
-        # We wrap the lambda in RunnableLambda to make it a valid part of the chain.
+        
+        
+        def get_retrieved_docs(input_dict):
+            retriever = self._get_retriever(input_dict["user_role"])
+            docs = retriever.invoke(input_dict["question"])
+            if not docs:
+                return [{
+                    "page_content": "",
+                    "metadata": {"source": "N/A"}
+                }]
+            return docs
+
         chain = (
             {
-                "context": RunnableLambda(lambda x: self._get_retriever(x["user_role"])).pipe(format_docs),
+                "context": RunnableLambda(get_retrieved_docs) | RunnableLambda(format_docs),
                 "question": itemgetter("question"),
                 "core_values": itemgetter("core_values"),
             }
@@ -94,12 +105,13 @@ class GPTService:
         return chain
 
     def get_answer(self, query: str, user_role: str = "general"):
-        print(f"Invoking RAG chain for user role: {user_role}")
+        print(f"[GPTService] RAG chain input → role={user_role}, query={query}")
         response = self.rag_chain.invoke({
             "question": query,
             "user_role": user_role,
             "core_values": settings.METAMORPHIC_CORE_VALUES
         })
+        print(f"[GPTService] RAG chain output →\n{response}")
         return response
 
 gpt_service = GPTService()
