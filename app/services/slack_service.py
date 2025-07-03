@@ -25,30 +25,57 @@ app_handler = SlackRequestHandler(slack_app)
 
 
 
+# def get_user_role(user_id: str, client):
+#     """
+#     Fetches a user's profile from Slack to determine their role.
+#     Includes enhanced error logging.
+#     """
+#     try:
+#         response = client.users_profile_get(user=user_id)
+#         profile = response.get("profile", {})
+#         fields = profile.get("fields", {})
+#         for field_id, field_data in fields.items():
+#             if field_data.get("label") == "Role":
+#                 # Found the role, return it
+#                 return field_data.get("value", "general").lower()
+#         # If the loop finishes without finding the 'Role' field
+#         print(f"User {user_id} profile checked, but 'Role' field not found.")
+#         return "general"
+#     except SlackApiError as e:
+#         # This is the new, important logging part.
+#         # It will print the exact error from Slack (e.g., 'missing_scope').
+#         print(f"Slack API Error fetching user role for {user_id}: {e.response['error']}")
+#     except Exception as e:
+#         print(f"A non-API error occurred fetching user role for {user_id}: {e}")
+    
+#     return "general"
+
 def get_user_role(user_id: str, client):
     """
-    Fetches a user's profile from Slack to determine their role.
-    Includes enhanced error logging.
+    Fetches the user's Slack profile and extracts their custom 'Role' field value.
+    Since Slack does not return field labels, we assume the first custom field with a non-empty value is 'Role'.
     """
     try:
         response = client.users_profile_get(user=user_id)
         profile = response.get("profile", {})
         fields = profile.get("fields", {})
+        print(json.dumps(profile, indent=2))
+        if not fields:
+            print(f"[ROLE] No custom fields found for user {user_id}")
+            return "general"
+
         for field_id, field_data in fields.items():
-            if field_data.get("label") == "Role":
-                # Found the role, return it
-                return field_data.get("value", "general").lower()
-        # If the loop finishes without finding the 'Role' field
-        print(f"User {user_id} profile checked, but 'Role' field not found.")
+            value = field_data.get("value")
+            if value:
+                print(f"[ROLE] Found value '{value}' for custom field {field_id}")
+                return value.lower()
+
+        print(f"[ROLE] No non-empty custom fields found for user {user_id}")
         return "general"
-    except SlackApiError as e:
-        # This is the new, important logging part.
-        # It will print the exact error from Slack (e.g., 'missing_scope').
-        print(f"Slack API Error fetching user role for {user_id}: {e.response['error']}")
     except Exception as e:
-        print(f"A non-API error occurred fetching user role for {user_id}: {e}")
-    
-    return "general"
+        print(f"[ROLE] Error fetching role for user {user_id}: {e}")
+        return "general"
+
 
 def process_ai_request_and_respond(payload, client):
     """
@@ -88,7 +115,7 @@ def process_ai_request_and_respond(payload, client):
 def handle_app_mentions(ack, body, say, client):
     """Handles mentions of the bot. Acknowledges and then processes."""
     ack() # Acknowledge the event immediately
-    
+    print("✅ Mention received:", body)
     # Send an immediate, temporary "thinking" message
     say(f"Hello <@{body['event']['user']}>! I'm thinking about your question...")
     
